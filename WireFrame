@@ -1,0 +1,71 @@
+echo "# SampleSovereignIdentityERC-725" >> README.md
+git init
+git add README.md
+git commit -m "first commit"
+git branch -M main
+git remote add origin https://github.com/iantstaley/SampleSovereignIdentityERC-725.git
+git push -u origin main
+pragma solidity ^0.8.0;
+
+contract ERC725 {
+
+    struct Identity {
+        mapping (bytes32 => bytes32) data;
+        address recoveryKey;
+        address[] keys;
+        uint256 executionNonce;
+    }
+
+    mapping (address => Identity) private identities;
+
+    event KeyAdded(bytes32 indexed key, bytes32 indexed value);
+    event KeyRemoved(bytes32 indexed key, bytes32 indexed value);
+    event ExecutionRequested(uint256 indexed executionNonce, bytes32 indexed operationType, bytes32 indexed dataHash);
+
+    function addKey(bytes32 _key, bytes32 _value) public {
+        Identity storage identity = identities[msg.sender];
+        identity.data[_key] = _value;
+        identity.keys.push(_key);
+        emit KeyAdded(_key, _value);
+    }
+
+    function removeKey(bytes32 _key) public {
+        Identity storage identity = identities[msg.sender];
+        require(identity.data[_key] != 0, "Key does not exist");
+        delete identity.data[_key];
+        for (uint i = 0; i < identity.keys.length; i++) {
+            if (identity.keys[i] == _key) {
+                identity.keys[i] = identity.keys[identity.keys.length - 1];
+                identity.keys.pop();
+                break;
+            }
+        }
+        emit KeyRemoved(_key, identity.data[_key]);
+    }
+
+    function execute(bytes32 _operationType, bytes32 _dataHash, bytes memory _signature) public {
+        Identity storage identity = identities[msg.sender];
+        require(identity.data[keccak256(_signature)] == 0, "Invalid signature");
+        bytes32 messageHash = keccak256(abi.encodePacked(identity.executionNonce, _operationType, _dataHash));
+        address signer = recover(messageHash, _signature);
+        require(signer == identity.recoveryKey, "Invalid signer");
+        identity.executionNonce++;
+        emit ExecutionRequested(identity.executionNonce, _operationType, _dataHash);
+    }
+
+    function recover(bytes32 _hash, bytes memory _signature) internal pure returns (address) {
+        bytes32 r;
+        bytes32 s;
+        uint8 v;
+        assembly {
+            r := mload(add(_signature, 32))
+            s := mload(add(_signature, 64))
+            v := byte(0, mload(add(_signature, 96)))
+        }
+        if (v < 27) {
+            v += 27;
+        }
+        require(v == 27 || v == 28, "Invalid signature");
+        return ecrecover(_hash, v, r, s);
+    }
+}
